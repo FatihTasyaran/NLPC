@@ -1,3 +1,4 @@
+import transformers
 from transformers import *
 import os
 import sys
@@ -19,6 +20,10 @@ import pickle
 from tqdm import tqdm, trange
 from ast import literal_eval
 ##FROM PETAL##
+
+##FROM COLAB##
+from torch.utils.data import Dataset, DataLoader, RandomSampler, SequentialSampler
+##FROM COLAB##
 
 
 #tokenizer = AutoTokenizer.from_pretrained('allenai/scibert_scivocab_uncased')
@@ -56,9 +61,7 @@ column_locs = {'research-problem': 2,
 }
 
 ids = 0
-
 data = pd.DataFrame(columns = column_names)
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class CustomDataset(Dataset):
@@ -66,8 +69,8 @@ class CustomDataset(Dataset):
     def __init__(self, dataframe, tokenizer, max_len):
         self.tokenizer = tokenizer
         self.data = dataframe
-        self.comment_text = dataframe.comment_text
-        self.targets = self.data.list
+        self.comment_text = dataframe.sentence
+        self.targets = self.data.one_hot_labels
         self.max_len = max_len
 
     def __len__(self):
@@ -82,12 +85,13 @@ class CustomDataset(Dataset):
             None,
             add_special_tokens=True,
             max_length=self.max_len,
+            truncation=True,
             pad_to_max_length=True,
             return_token_type_ids=True
         )
         ids = inputs['input_ids']
         mask = inputs['attention_mask']
-        token_type_ids = inputs["token_type_ids"]
+        token_type_ids = inputs['token_type_ids']
 
 
         return {
@@ -102,18 +106,20 @@ class BERTClass(torch.nn.Module):
     def __init__(self):
         super(BERTClass, self).__init__()
         #self.l1 = transformers.BertModel.from_pretrained('bert-base-uncased')
-        self.l1 = model = AutoModel.from_pretrained('allenai/scibert_scivocab_uncased')
+        self.l1 = AutoModel.from_pretrained('allenai/scibert_scivocab_uncased') 
         self.l2 = torch.nn.Dropout(0.3)
-        self.l3 = torch.nn.Linear(768, 6)
-        
+        self.l3 = torch.nn.Linear(768, 12) ##12 because we have 12 classes to choose from
+    
     def forward(self, ids, mask, token_type_ids):
-        _, output_1= self.l1(ids, attention_mask = mask, token_type_ids = token_type_ids)
+        _,output_1= self.l1(ids, attention_mask = mask, token_type_ids = token_type_ids)
         output_2 = self.l2(output_1)
         output = self.l3(output_2)
         return output
 
+def loss_fn(outputs, targets):
+    return torch.nn.BCEWithLogitsLoss()(outputs, targets)
 
-def train(epoch):
+def train(epoch, model):
     model.train()
     for _,data in enumerate(training_loader, 0):
         ids = data['ids'].to(device, dtype = torch.long)
@@ -121,23 +127,17 @@ def train(epoch):
         token_type_ids = data['token_type_ids'].to(device, dtype = torch.long)
         targets = data['targets'].to(device, dtype = torch.float)
 
+        
         outputs = model(ids, mask, token_type_ids)
         
         optimizer.zero_grad()
         loss = loss_fn(outputs, targets)
         if _%5000==0:
             print(f'Epoch: {epoch}, Loss:  {loss.item()}')
-            
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-    for epoch in range(EPOCHS):
-        train(epoch)
-
-def loss_fn(outputs, targets):
-    return torch.nn.BCEWithLogitsLoss()(outputs, targets)
-    
+        
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
 
 def bertify_data(path, sentences_dict):
     global ids
@@ -276,12 +276,12 @@ if __name__ == "__main__":
 
     # Creating the dataset and dataloader for the neural network
     train_size = 0.8
-    train_dataset=new_df.sample(frac=train_size,random_state=200)
-    test_dataset=new_df.drop(train_dataset.index).reset_index(drop=True)
+    train_dataset=data.sample(frac=train_size,random_state=200)
+    test_dataset=data.drop(train_dataset.index).reset_index(drop=True)
     train_dataset = train_dataset.reset_index(drop=True)
 
 
-    print("FULL Dataset: {}".format(new_df.shape))
+    print("FULL Dataset: {}".format(data.shape))
     print("TRAIN Dataset: {}".format(train_dataset.shape))
     print("TEST Dataset: {}".format(test_dataset.shape))
 
@@ -306,4 +306,5 @@ if __name__ == "__main__":
 
     optimizer = torch.optim.Adam(params =  model.parameters(), lr=LEARNING_RATE)
 
-    
+    for epoch in range(EPOCHS):
+        train(epoch, model)
