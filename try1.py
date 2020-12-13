@@ -61,6 +61,84 @@ data = pd.DataFrame(columns = column_names)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+class CustomDataset(Dataset):
+
+    def __init__(self, dataframe, tokenizer, max_len):
+        self.tokenizer = tokenizer
+        self.data = dataframe
+        self.comment_text = dataframe.comment_text
+        self.targets = self.data.list
+        self.max_len = max_len
+
+    def __len__(self):
+        return len(self.comment_text)
+
+    def __getitem__(self, index):
+        comment_text = str(self.comment_text[index])
+        comment_text = " ".join(comment_text.split())
+
+        inputs = self.tokenizer.encode_plus(
+            comment_text,
+            None,
+            add_special_tokens=True,
+            max_length=self.max_len,
+            pad_to_max_length=True,
+            return_token_type_ids=True
+        )
+        ids = inputs['input_ids']
+        mask = inputs['attention_mask']
+        token_type_ids = inputs["token_type_ids"]
+
+
+        return {
+            'ids': torch.tensor(ids, dtype=torch.long),
+            'mask': torch.tensor(mask, dtype=torch.long),
+            'token_type_ids': torch.tensor(token_type_ids, dtype=torch.long),
+            'targets': torch.tensor(self.targets[index], dtype=torch.float)
+        }
+
+# Creating the customized model, by adding a drop out and a dense layer on top of distil bert to get the final output for the model. 
+class BERTClass(torch.nn.Module):
+    def __init__(self):
+        super(BERTClass, self).__init__()
+        #self.l1 = transformers.BertModel.from_pretrained('bert-base-uncased')
+        self.l1 = model = AutoModel.from_pretrained('allenai/scibert_scivocab_uncased')
+        self.l2 = torch.nn.Dropout(0.3)
+        self.l3 = torch.nn.Linear(768, 6)
+        
+    def forward(self, ids, mask, token_type_ids):
+        _, output_1= self.l1(ids, attention_mask = mask, token_type_ids = token_type_ids)
+        output_2 = self.l2(output_1)
+        output = self.l3(output_2)
+        return output
+
+
+def train(epoch):
+    model.train()
+    for _,data in enumerate(training_loader, 0):
+        ids = data['ids'].to(device, dtype = torch.long)
+        mask = data['mask'].to(device, dtype = torch.long)
+        token_type_ids = data['token_type_ids'].to(device, dtype = torch.long)
+        targets = data['targets'].to(device, dtype = torch.float)
+
+        outputs = model(ids, mask, token_type_ids)
+        
+        optimizer.zero_grad()
+        loss = loss_fn(outputs, targets)
+        if _%5000==0:
+            print(f'Epoch: {epoch}, Loss:  {loss.item()}')
+            
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+    for epoch in range(EPOCHS):
+        train(epoch)
+
+def loss_fn(outputs, targets):
+    return torch.nn.BCEWithLogitsLoss()(outputs, targets)
+    
+
 def bertify_data(path, sentences_dict):
     global ids
     global data
@@ -187,137 +265,45 @@ if __name__ == "__main__":
     sentences = list(data.sentence.values)
     
     tokenizer = AutoTokenizer.from_pretrained('allenai/scibert_scivocab_uncased')
-    model = AutoModel.from_pretrained('allenai/scibert_scivocab_uncased', num_labels=len(label_cols))
+    #model = AutoModel.from_pretrained('allenai/scibert_scivocab_uncased', num_labels=len(label_cols))
     num_labels = len(label_cols)
 
-    optimizer = AdamW(model.parameters(),lr=2e-5)
-                        
-    max_length = 100
-    encodings = tokenizer.batch_encode_plus(sentences, max_length=max_length, pad_to_max_length=True, truncation=True)
-    print('Tokenizer outputs:', encodings.keys())
+    MAX_LEN=100
+    TRAIN_BATCH_SIZE=8
+    VALID_BATCH_SIZE=4
+    EPOCHS=1
+    LEARNING_RATE=1e-05
 
-    input_ids = encodings['input_ids']
-    token_type_ids = encodings['token_type_ids']
-    attention_masks = encodings['attention_mask']
+    # Creating the dataset and dataloader for the neural network
+    train_size = 0.8
+    train_dataset=new_df.sample(frac=train_size,random_state=200)
+    test_dataset=new_df.drop(train_dataset.index).reset_index(drop=True)
+    train_dataset = train_dataset.reset_index(drop=True)
 
-    train_inputs, validation_inputs, train_labels, validation_labels, train_token_types, validation_token_types, train_masks, validation_masks = train_test_split(input_ids, labels, token_type_ids,attention_masks,random_state=2020, test_size=0.10)
 
-    # Convert all of our data into torch tensors, the required datatype for our model
-    train_inputs = torch.tensor(train_inputs)
-    train_labels = torch.tensor(train_labels)
-    train_masks = torch.tensor(train_masks)
-    train_token_types = torch.tensor(train_token_types)
+    print("FULL Dataset: {}".format(new_df.shape))
+    print("TRAIN Dataset: {}".format(train_dataset.shape))
+    print("TEST Dataset: {}".format(test_dataset.shape))
 
-    validation_inputs = torch.tensor(validation_inputs)
-    validation_labels = torch.tensor(validation_labels)
-    validation_masks = torch.tensor(validation_masks)
-    validation_token_types = torch.tensor(validation_token_types)
+    training_set = CustomDataset(train_dataset, tokenizer, MAX_LEN)
+    testing_set = CustomDataset(test_dataset, tokenizer, MAX_LEN)
 
-    batch_size = 32
+    train_params = {'batch_size': TRAIN_BATCH_SIZE,
+                    'shuffle': True,
+                    'num_workers': 0
+    }
 
-    # Create an iterator of our data with torch DataLoader. This helps save on memory during training because, unlike a for loop, with an iterator the entire dataset does not need to be loaded into memory
+    test_params = {'batch_size': VALID_BATCH_SIZE,
+                   'shuffle': True,
+                   'num_workers': 0
+    }
 
-    train_data = TensorDataset(train_inputs, train_masks, train_labels, train_token_types)
-    train_sampler = RandomSampler(train_data)
-    train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=batch_size)
+    training_loader = DataLoader(training_set, **train_params)
+    testing_loader = DataLoader(testing_set, **test_params)
 
-    validation_data = TensorDataset(validation_inputs, validation_masks, validation_labels, validation_token_types)
-    validation_sampler = SequentialSampler(validation_data)
-    validation_dataloader = DataLoader(validation_data, sampler=validation_sampler, batch_size=batch_size)
+    model = BERTClass()
+    model.to(device)
 
-    torch.save(validation_dataloader,'validation_data_loader')
-    torch.save(train_dataloader,'train_data_loader')
+    optimizer = torch.optim.Adam(params =  model.parameters(), lr=LEARNING_RATE)
+
     
-    
-    ##TRAIN
-    # Store our loss and accuracy for plotting
-    train_loss_set = []
-
-    # Number of training epochs (authors recommend between 2 and 4)
-    epochs = 3
-
-    # trange is a tqdm wrapper around the normal python range
-    for _ in trange(epochs, desc="Epoch"):
-        # Training
-        # Set our model to training mode (as opposed to evaluation mode)
-        model.train()
-
-        # Tracking variables
-        tr_loss = 0 #running loss
-        nb_tr_examples, nb_tr_steps = 0, 0
-  
-        # Train the data for one epoch
-        for step, batch in enumerate(train_dataloader):
-            # Add batch to GPU
-            batch = tuple(t.to(device) for t in batch)
-            # Unpack the inputs from our dataloader
-            b_input_ids, b_input_mask, b_labels, b_token_types = batch
-            # Clear out the gradients (by default they accumulate)
-            optimizer.zero_grad()
-
-            # # Forward pass for multiclass classification
-            outputs = model(b_input_ids, token_type_ids=None, attention_mask=b_input_mask, labels=b_labels)
-            loss = outputs[0]
-            logits = outputs[1]
-
-            # Forward pass for multilabel classification
-            #outputs = model(b_input_ids, token_type_ids=None, attention_mask=b_input_mask)
-            #logits = outputs[0]
-            #loss_func = BCEWithLogitsLoss() 
-            #loss = loss_func(logits.view(-1,num_labels),b_labels.type_as(logits).view(-1,num_labels)) #convert labels to float for calculation
-            # loss_func = BCELoss() 
-            # loss = loss_func(torch.sigmoid(logits.view(-1,num_labels)),b_labels.type_as(logits).view(-1,num_labels)) #convert labels to float for calculation
-            #train_loss_set.append(loss.item())    
-
-            # Backward pass
-            loss.backward()
-            # Update parameters and take a step using the computed gradient
-            optimizer.step()
-            # scheduler.step()
-            # Update tracking variables
-            tr_loss += loss.item()
-            nb_tr_examples += b_input_ids.size(0)
-            nb_tr_steps += 1
-
-        print("Train loss: {}".format(tr_loss/nb_tr_steps))
-
-        ##VALIDATION
-        model.eval()
-
-        # Variables to gather full output
-        logit_preds,true_labels,pred_labels,tokenized_texts = [],[],[],[]
-
-        # Predict
-        for i, batch in enumerate(validation_dataloader):
-            batch = tuple(t.to(device) for t in batch)
-            # Unpack the inputs from our dataloader
-            b_input_ids, b_input_mask, b_labels, b_token_types = batch
-            with torch.no_grad():
-                # Forward pass
-                outs = model(b_input_ids, token_type_ids=None, attention_mask=b_input_mask)
-                b_logit_pred = outs[0]
-                pred_label = torch.sigmoid(b_logit_pred)
-
-                b_logit_pred = b_logit_pred.detach().cpu().numpy()
-                pred_label = pred_label.to('cpu').numpy()
-                b_labels = b_labels.to('cpu').numpy()
-
-            tokenized_texts.append(b_input_ids)
-            logit_preds.append(b_logit_pred)
-            true_labels.append(b_labels)
-            pred_labels.append(pred_label)
-
-        # Flatten outputs
-        pred_labels = [item for sublist in pred_labels for item in sublist]
-        true_labels = [item for sublist in true_labels for item in sublist]
-
-        # Calculate Accuracy
-        threshold = 0.50
-        pred_bools = [pl>threshold for pl in pred_labels]
-        true_bools = [tl==1 for tl in true_labels]
-        val_f1_accuracy = f1_score(true_bools,pred_bools,average='micro')*100
-        val_flat_accuracy = accuracy_score(true_bools, pred_bools)*100
-
-        print('F1 Validation Accuracy: ', val_f1_accuracy)
-        print('Flat Validation Accuracy: ', val_flat_accuracy)
-
