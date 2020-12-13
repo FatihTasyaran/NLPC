@@ -4,6 +4,8 @@ import os
 #tokenizer = AutoTokenizer.from_pretrained('allenai/scibert_scivocab_uncased')
 #model = AutoModel.from_pretrained('allenai/scibert_scivocab_uncased')
 
+#def bertify_data(datapath):
+
 folder_mask = '/home/fatih/Documents/CS546/Project/trial_data/machine-translation/0/'
 info_units = folder_mask + 'info-units/'
 stanza = folder_mask + '1406.1078v3-Stanza-out.txt'
