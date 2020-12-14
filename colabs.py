@@ -100,8 +100,6 @@ Followed by that we will preapre the device for GPU execeution. This configurati
 
 # Installing the transformers library and additional libraries if looking process 
 
-!pip install -q transformers
-
 # Code for TPU packages install
 # !curl -q https://raw.githubusercontent.com/pytorch/xla/master/contrib/scripts/env-setup.py -o pytorch-xla-env-setup.py
 # !python pytorch-xla-env-setup.py --apt-packages libomp5 libopenblas-dev
@@ -110,11 +108,15 @@ Followed by that we will preapre the device for GPU execeution. This configurati
 import numpy as np
 import pandas as pd
 from sklearn import metrics
+from sklearn.metrics import classification_report, confusion_matrix, multilabel_confusion_matrix, f1_score, accuracy_score
 import transformers
 import torch
 from torch.utils.data import Dataset, DataLoader, RandomSampler, SequentialSampler
 from transformers import BertTokenizer, BertModel, BertConfig
-
+from transformers import*
+from sklearn.metrics import confusion_matrix
+import seaborn as sns
+import matplotlib.pyplot as plt
 # Preparing for TPU usage
 # import torch_xla
 # import torch_xla.core.xla_model as xm
@@ -136,7 +138,8 @@ We will be working with the data and preparing for fine tuning purposes.
 * The list is appened as a new column and other columns are removed
 """
 
-df = pd.read_csv("tryer.csv")
+#df = pd.read_csv("tryer.csv")
+df = pd.read_csv("light.csv")
 df['list'] = df[df.columns[3:]].values.tolist()
 new_df = df[['sentence', 'list']].copy()
 new_df.head()
@@ -170,12 +173,14 @@ Dataset and Dataloader are constructs of the PyTorch library for defining and co
 # Sections of config
 
 # Defining some key variables that will be used later on in the training
-MAX_LEN = 200
-TRAIN_BATCH_SIZE = 8
-VALID_BATCH_SIZE = 4
+MAX_LEN = 50
+TRAIN_BATCH_SIZE = 32
+VALID_BATCH_SIZE = 32
 EPOCHS = 1
-LEARNING_RATE = 1e-05
-tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+LEARNING_RATE = 1e-6
+
+#tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+tokenizer = AutoTokenizer.from_pretrained('allenai/scibert_scivocab_uncased')
 
 class CustomDataset(Dataset):
 
@@ -199,7 +204,8 @@ class CustomDataset(Dataset):
             add_special_tokens=True,
             max_length=self.max_len,
             pad_to_max_length=True,
-            return_token_type_ids=True
+            return_token_type_ids=True,
+            truncation=True
         )
         ids = inputs['input_ids']
         mask = inputs['attention_mask']
@@ -272,12 +278,13 @@ testing_loader = DataLoader(testing_set, **test_params)
 class BERTClass(torch.nn.Module):
     def __init__(self):
         super(BERTClass, self).__init__()
-        self.l1 = transformers.BertModel.from_pretrained('bert-base-uncased')
-        self.l2 = torch.nn.Dropout(0.3)
+        #self.l1 = transformers.BertModel.from_pretrained('bert-base-uncased')
+        self.l1 = AutoModel.from_pretrained('allenai/scibert_scivocab_uncased')
+        self.l2 = torch.nn.Dropout(0.15)
         self.l3 = torch.nn.Linear(768, 12)
     
     def forward(self, ids, mask, token_type_ids):
-        _, output_1= self.l1(ids, attention_mask = mask, token_type_ids = token_type_ids).values()
+        _, output_1= self.l1(ids, attention_mask = mask, token_type_ids = token_type_ids)#.values()
         output_2 = self.l2(output_1)
         output = self.l3(output_2)
         return output
@@ -359,15 +366,28 @@ def validation(epoch):
             fin_outputs.extend(torch.sigmoid(outputs).cpu().detach().numpy().tolist())
     return fin_outputs, fin_targets
 
-for epoch in range(EPOCHS):
+for epoch in range(1):
     outputs, targets = validation(epoch)
     outputs = np.array(outputs) >= 0.5
     accuracy = metrics.accuracy_score(targets, outputs)
-    f1_score_micro = metrics.f1_score(targets, outputs, average='micro')
-    f1_score_macro = metrics.f1_score(targets, outputs, average='macro')
+    f1_score_micro = metrics.f1_score(targets, outputs, average='micro', zero_division=1)
+    f1_score_macro = metrics.f1_score(targets, outputs, average='macro', zero_division=1)
     print(f"Accuracy Score = {accuracy}")
     print(f"F1 Score (Micro) = {f1_score_micro}")
     print(f"F1 Score (Macro) = {f1_score_macro}")
+    column_names = ['research-problem', 'approach', 'model', 'code', 'dataset', 'experimental-setup', 'hyperparameters', 'baselines', 'results', 'tasks', 'experiments', 'ablation-analysis']
+    print(classification_report(targets,outputs,target_names=column_names,zero_division=1))
+    #print(type(targets), type(outputs))
+    #print(shape(targets), shape(outputs))
+    column_names = [1,2,3,4,5,6,7,8,9,10,11,12]
+    cm = confusion_matrix(np.array(targets).argmax(axis=1), outputs.argmax(axis=1), column_names)
+    ax= plt.subplot()
+    sns.heatmap(cm, annot=True, ax = ax); #annot=True to annotate cells
+    ax.set_xlabel('Predicted labels');ax.set_ylabel('True labels');
+    ax.set_title('Confusion Matrix');
+    ax.xaxis.set_ticklabels(column_names); ax.yaxis.set_ticklabels(column_names);
+    plt.savefig('conf.pdf')
+    
 
 """<a id='section07'></a>
 ### Saving the Trained Model Artifacts for inference
