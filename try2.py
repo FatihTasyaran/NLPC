@@ -7,7 +7,7 @@ import numpy as np
 #from sklearn.model_selection import train_test_split
 
 ##FROM PETAL##
-import tensorflow as tf
+#import tensorflow as tf
 import torch
 from torch.nn import BCEWithLogitsLoss, BCELoss
 from torch.utils.data import TensorDataset, DataLoader, RandomSampler, SequentialSampler
@@ -23,6 +23,7 @@ from ast import literal_eval
 
 ##FROM COLAB##
 from torch.utils.data import Dataset, DataLoader, RandomSampler, SequentialSampler
+from sklearn import metrics
 ##FROM COLAB##
 
 
@@ -290,9 +291,9 @@ if __name__ == "__main__":
     #model = AutoModel.from_pretrained('allenai/scibert_scivocab_uncased', num_labels=len(label_cols))
     num_labels = len(label_cols)
 
-    MAX_LEN=100
-    TRAIN_BATCH_SIZE=8
-    VALID_BATCH_SIZE=4
+    MAX_LEN=50
+    TRAIN_BATCH_SIZE=512
+    VALID_BATCH_SIZE=512
     EPOCHS=3
     LEARNING_RATE=1e-05
 
@@ -335,8 +336,8 @@ if __name__ == "__main__":
       outputs, targets = validation(epoch)
       outputs = np.array(outputs) >= 0.5
       accuracy = metrics.accuracy_score(targets, outputs)
-      f1_score_micro = metrics.f1_score(targets, outputs, average='micro')
-      f1_score_macro = metrics.f1_score(targets, outputs, average='macro')
+      f1_score_micro = metrics.f1_score(targets, outputs, average='micro',labels=np.unique(outputs))
+      f1_score_macro = metrics.f1_score(targets, outputs, average='macro',labels=np.unique(outputs))
       print(f"Accuracy Score = {accuracy}")
       print(f"F1 Score (Micro) = {f1_score_micro}")
       print(f"F1 Score (Macro) = {f1_score_macro}")
