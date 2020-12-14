@@ -138,8 +138,8 @@ We will be working with the data and preparing for fine tuning purposes.
 * The list is appened as a new column and other columns are removed
 """
 
-#df = pd.read_csv("tryer.csv")
-df = pd.read_csv("light.csv")
+df = pd.read_csv("tryer.csv")
+#df = pd.read_csv("light.csv")
 df['list'] = df[df.columns[3:]].values.tolist()
 new_df = df[['sentence', 'list']].copy()
 new_df.head()
@@ -176,8 +176,8 @@ Dataset and Dataloader are constructs of the PyTorch library for defining and co
 MAX_LEN = 50
 TRAIN_BATCH_SIZE = 32
 VALID_BATCH_SIZE = 32
-EPOCHS = 1
-LEARNING_RATE = 1e-6
+EPOCHS = 2
+LEARNING_RATE = 1e-5
 
 #tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
 tokenizer = AutoTokenizer.from_pretrained('allenai/scibert_scivocab_uncased')
@@ -280,7 +280,7 @@ class BERTClass(torch.nn.Module):
         super(BERTClass, self).__init__()
         #self.l1 = transformers.BertModel.from_pretrained('bert-base-uncased')
         self.l1 = AutoModel.from_pretrained('allenai/scibert_scivocab_uncased')
-        self.l2 = torch.nn.Dropout(0.15)
+        self.l2 = torch.nn.Dropout(0.3)
         self.l3 = torch.nn.Linear(768, 12)
     
     def forward(self, ids, mask, token_type_ids):
@@ -366,7 +366,7 @@ def validation(epoch):
             fin_outputs.extend(torch.sigmoid(outputs).cpu().detach().numpy().tolist())
     return fin_outputs, fin_targets
 
-for epoch in range(1):
+for epoch in range(EPOCHS):
     outputs, targets = validation(epoch)
     outputs = np.array(outputs) >= 0.5
     accuracy = metrics.accuracy_score(targets, outputs)

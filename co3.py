@@ -176,7 +176,7 @@ Dataset and Dataloader are constructs of the PyTorch library for defining and co
 MAX_LEN = 50
 TRAIN_BATCH_SIZE = 32
 VALID_BATCH_SIZE = 32
-EPOCHS = 1
+EPOCHS = 5
 LEARNING_RATE = 1e-6
 
 #tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
@@ -280,7 +280,7 @@ class BERTClass(torch.nn.Module):
         super(BERTClass, self).__init__()
         #self.l1 = transformers.BertModel.from_pretrained('bert-base-uncased')
         self.l1 = AutoModel.from_pretrained('allenai/scibert_scivocab_uncased')
-        self.l2 = torch.nn.Dropout(0.15)
+        self.l2 = torch.nn.Dropout(0.3)
         self.l3 = torch.nn.Linear(768, 12)
     
     def forward(self, ids, mask, token_type_ids):
@@ -366,7 +366,7 @@ def validation(epoch):
             fin_outputs.extend(torch.sigmoid(outputs).cpu().detach().numpy().tolist())
     return fin_outputs, fin_targets
 
-for epoch in range(1):
+for epoch in range(EPOCHS):
     outputs, targets = validation(epoch)
     outputs = np.array(outputs) >= 0.5
     accuracy = metrics.accuracy_score(targets, outputs)
