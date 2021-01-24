@@ -173,11 +173,11 @@ Dataset and Dataloader are constructs of the PyTorch library for defining and co
 # Sections of config
 
 # Defining some key variables that will be used later on in the training
-MAX_LEN = 50
-TRAIN_BATCH_SIZE = 32
-VALID_BATCH_SIZE = 32
-EPOCHS = 1
-LEARNING_RATE = 1e-6
+MAX_LEN = 100
+TRAIN_BATCH_SIZE = 4
+VALID_BATCH_SIZE = 4
+EPOCHS = 2
+LEARNING_RATE = 3e-6
 
 #tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
 tokenizer = AutoTokenizer.from_pretrained('allenai/scibert_scivocab_uncased')
@@ -290,6 +290,7 @@ class BERTClass(torch.nn.Module):
         return output
 
 model = BERTClass()
+print("Device was:", device)
 model.to(device)
 
 def loss_fn(outputs, targets):
